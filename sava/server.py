@@ -48,9 +48,12 @@ def list_comments(doc_id: str) -> str:
 
 @mcp.tool()
 def add_comment(doc_id: str, message: str, quote: str = "") -> str:
-    """Post a comment on a file. If quote is provided, the comment
-    will reference that text passage."""
-    return gdocs.add_comment(doc_id, message, quote)
+    """Post a comment on a file. If quote is provided, the comment will be
+    anchored to that text via browser automation (required for .docx files).
+    Without quote, posts an unanchored comment via the API."""
+    if quote:
+        return gdocs.anchor_comment(doc_id, quote, message)
+    return gdocs.add_comment(doc_id, message)
 
 
 @mcp.tool()
