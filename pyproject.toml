@@ -1,0 +1,18 @@
+[project]
+name = "sava"
+version = "0.1.0"
+description = "Personal AI assistant — MCP server for Google Workspace, GCP, and more"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0",
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "playwright>=1.40",
+]
+
+[project.scripts]
+sava = "sava.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
