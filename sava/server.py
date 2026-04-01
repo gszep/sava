@@ -8,12 +8,12 @@ mcp = FastMCP("sava")
 
 
 # ---------------------------------------------------------------------------
-# Google Drive
+# Reading (API-based — fast and reliable)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
 def list_files() -> str:
-    """List all files accessible to Sava on Google Drive (docs, spreadsheets, PDFs, etc.)."""
+    """List all files accessible to Sava on Google Drive."""
     return gdocs.list_docs()
 
 
@@ -25,9 +25,11 @@ def read_doc(doc_id: str) -> str:
     return gdocs.read_doc(doc_id)
 
 
-# ---------------------------------------------------------------------------
-# Google Sheets
-# ---------------------------------------------------------------------------
+@mcp.tool()
+def list_comments(doc_id: str) -> str:
+    """List all comments and replies on a file."""
+    return gdocs.list_comments(doc_id)
+
 
 @mcp.tool()
 def write_sheet(spreadsheet_id: str, range: str, values: list[list[str]]) -> str:
@@ -37,54 +39,34 @@ def write_sheet(spreadsheet_id: str, range: str, values: list[list[str]]) -> str
 
 
 # ---------------------------------------------------------------------------
-# Comments (works on any Google Drive file)
+# Document editing (Playwright-based — works on both native Docs and .docx)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def list_comments(doc_id: str) -> str:
-    """List all comments and replies on a file."""
-    return gdocs.list_comments(doc_id)
+def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
+    """Create a tracked suggestion (Suggesting mode) in a document.
+    Finds the quoted text and suggests replacing it with the replacement.
+    Creates inline diffs: green for additions, red strikethrough for deletions."""
+    return gdocs.suggest_edit(doc_id, quote, replacement)
 
 
 @mcp.tool()
-def add_comment(doc_id: str, message: str, quote: str = "") -> str:
-    """Post a comment on a file. If quote is provided, the comment will be
-    anchored to that text via browser automation (required for .docx files).
-    Without quote, posts an unanchored comment via the API."""
-    if quote:
-        return gdocs.anchor_comment(doc_id, quote, message)
-    return gdocs.add_comment(doc_id, message)
+def anchor_comment(doc_id: str, quote: str, message: str) -> str:
+    """Post a comment anchored/highlighted to specific text in a document.
+    Use only for notes, questions, or explanations — prefer suggest_edit for changes."""
+    return gdocs.anchor_comment(doc_id, quote, message)
+
+
+@mcp.tool()
+def resolve_all_comments(doc_id: str) -> str:
+    """Resolve all open comments in a document."""
+    return gdocs.resolve_all_comments(doc_id)
 
 
 @mcp.tool()
 def reply_to_comment(doc_id: str, comment_id: str, message: str) -> str:
     """Reply to an existing comment."""
     return gdocs.reply_to_comment(doc_id, comment_id, message)
-
-
-@mcp.tool()
-def resolve_comment(doc_id: str, comment_id: str, message: str = "Resolved.") -> str:
-    """Resolve a comment thread."""
-    return gdocs.resolve_comment(doc_id, comment_id, message)
-
-
-# ---------------------------------------------------------------------------
-# Browser-based (Playwright) — anchored comments + suggesting mode
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-def anchor_comment(doc_id: str, quote: str, message: str) -> str:
-    """Post a comment anchored/highlighted to specific text.
-    Uses browser automation. Requires a saved browser session."""
-    return gdocs.anchor_comment(doc_id, quote, message)
-
-
-@mcp.tool()
-def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
-    """Create a tracked suggestion (suggesting mode).
-    Finds the quoted text and suggests replacing it with the replacement.
-    Uses browser automation. Requires a saved browser session."""
-    return gdocs.suggest_edit(doc_id, quote, replacement)
 
 
 def main():

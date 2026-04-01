@@ -194,6 +194,66 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     return f'Suggested edit: "{quote}" -> "{replacement}"'
 
 
+def do_resolve_all_comments(pw, cookies_file, doc_id):
+    """Resolve all open comments in the document via the UI.
+
+    Strategy: click each comment thread to open it, then click the
+    resolve (checkmark) button. Track which comments we've resolved
+    to avoid infinite loops.
+    """
+    browser, context, page = open_doc(pw, cookies_file, doc_id)
+
+    page.locator(".kix-appview-editor").click()
+    page.wait_for_timeout(1000)
+
+    # First, click on a comment highlight in the doc to open the comment pane
+    # Then look for resolve buttons
+    resolved = 0
+    last_count = -1
+
+    for attempt in range(20):  # safety limit
+        # Count currently visible resolve buttons to detect progress
+        count = page.evaluate("""() => {
+            return document.querySelectorAll(
+                '[aria-label*="esolve"], [data-tooltip*="esolve"]'
+            ).length;
+        }""")
+
+        if count == 0 or count == last_count:
+            # No resolve buttons, or we're stuck — try clicking a comment highlight
+            clicked = page.evaluate("""() => {
+                // Click any comment highlight/annotation in the doc body
+                const highlights = document.querySelectorAll(
+                    '.docos-anchoredreplyview, [class*="docos-anchor"], .kix-commenthighlight'
+                );
+                if (highlights.length > 0) {
+                    highlights[0].click();
+                    return true;
+                }
+                return false;
+            }""")
+            if not clicked:
+                break
+            page.wait_for_timeout(1500)
+            last_count = -1
+            continue
+
+        last_count = count
+
+        # Click the first resolve button
+        page.evaluate("""() => {
+            const btn = document.querySelector(
+                '[aria-label*="esolve"], [data-tooltip*="esolve"]'
+            );
+            if (btn) btn.click();
+        }""")
+        page.wait_for_timeout(2000)
+        resolved += 1
+
+    save_and_close(browser, context, cookies_file)
+    return f"Resolved {resolved} comments"
+
+
 def main():
     payload = json.loads(sys.stdin.read())
     action = payload["action"]
@@ -207,6 +267,10 @@ def main():
         elif action == "suggest_edit":
             result = do_suggest_edit(
                 pw, cookies_file, payload["doc_id"], payload["quote"], payload["replacement"]
+            )
+        elif action == "resolve_all_comments":
+            result = do_resolve_all_comments(
+                pw, cookies_file, payload["doc_id"]
             )
         else:
             result = f"Unknown action: {action}"

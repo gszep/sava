@@ -260,6 +260,11 @@ def anchor_comment(doc_id: str, quote: str, message: str) -> str:
     return run_playwright_action("anchor_comment", doc_id=doc_id, quote=quote, message=message)
 
 
+def resolve_all_comments(doc_id: str) -> str:
+    """Resolve all open comments in a document via browser automation."""
+    return run_playwright_action("resolve_all_comments", doc_id=doc_id)
+
+
 def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
     """Create a tracked suggestion using Find & Replace in Suggesting mode."""
     return run_playwright_action("suggest_edit", doc_id=doc_id, quote=quote, replacement=replacement)
