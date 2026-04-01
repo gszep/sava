@@ -126,19 +126,30 @@ def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
 def list_docs() -> str:
     """List all Google Docs accessible to Sava."""
     drive = _drive_service()
-    results = drive.files().list(
-        pageSize=50,
-        fields="files(id,name,owners,webViewLink)",
-        q="mimeType='application/vnd.google-apps.document'",
-    ).execute()
-
     lines = []
-    for f in results.get("files", []):
-        owners = ", ".join(o.get("emailAddress", "?") for o in f.get("owners", []))
-        lines.append(f"{f['name']}")
-        lines.append(f"  ID: {f['id']}")
-        lines.append(f"  Owner: {owners}")
-        lines.append(f"  Link: {f.get('webViewLink', 'N/A')}")
-        lines.append("")
+    page_token = None
+
+    while True:
+        results = drive.files().list(
+            pageSize=100,
+            fields="files(id,name,mimeType,owners,webViewLink),nextPageToken",
+            q="mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document'",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            pageToken=page_token,
+        ).execute()
+
+        for f in results.get("files", []):
+            owners = ", ".join(o.get("emailAddress", "?") for o in f.get("owners", []))
+            native = "Google Doc" if "google-apps" in f.get("mimeType", "") else "Word (.docx)"
+            lines.append(f"{f['name']}  [{native}]")
+            lines.append(f"  ID: {f['id']}")
+            lines.append(f"  Owner: {owners}")
+            lines.append(f"  Link: {f.get('webViewLink', 'N/A')}")
+            lines.append("")
+
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
 
     return "\n".join(lines) if lines else "No documents found."
