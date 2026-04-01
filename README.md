@@ -6,41 +6,34 @@ Named after a Eurasian eagle-owl. Quietly watches over your documents, drops sug
 
 ## What it does
 
-### Reading files
+### Reading (API-based)
 
-`read_doc` reads any file on Google Drive:
-
-| Format | Method |
+| Tool | Description |
 |---|---|
-| Google Docs | Docs API (with inline suggestions) |
-| Google Sheets | Sheets API (formatted as markdown tables) |
-| Word (.docx) | Download + lxml XML extraction |
-| Excel (.xlsx) | Download + openpyxl |
-| PDF | Download + pymupdf |
+| `read_doc` | Read any file: Google Docs, Google Sheets, Word (.docx), Excel (.xlsx), PDF |
+| `list_files` | List all files accessible to Sava on Google Drive |
+| `write_sheet` | Write to Google Sheets (A1 notation) |
 
-`list_files` lists everything Sava has access to — docs, sheets, PDFs, folders.
+### Document editing (Playwright-based)
 
-### Editing documents
+All document interactions go through headless Playwright browser automation. This is the only approach that works reliably across both native Google Docs and `.docx` files in compatibility mode.
 
-`suggest_edit` creates real tracked suggestions in Google Docs' Suggesting mode via headless Playwright. This is the preferred way to propose changes — it works on both native Google Docs and `.docx` files in compatibility mode.
+| Tool | Description |
+|---|---|
+| `suggest_edit` | Create tracked suggestions (Suggesting mode) — green additions, red strikethrough deletions |
+| `anchor_comment` | Post a comment highlighted on specific text |
+| `list_comments` | List all comments and suggestions visible in the UI |
+| `delete_all_comments` | Delete all comment threads authored by Sava |
 
-`anchor_comment` posts a comment highlighted on specific text, also via Playwright. Use this only when you need to explain something or provide a reference that doesn't fit as a text replacement.
-
-`write_sheet` writes to Google Sheets via the Sheets API.
-
-### Comments
-
-`list_comments` / `reply_to_comment` / `resolve_comment` manage comment threads via the Drive API.
-
-> **Note on `.docx` files:** The Drive API can create comments on `.docx` files hosted in Google Drive, but they are invisible in the Google Docs compatibility mode UI. Sava automatically routes quoted comments through Playwright (`anchor_comment`) to ensure they're always visible.
+`suggest_edit` is the preferred way to propose changes. Use `anchor_comment` only for notes, questions, or explanations that can't be expressed as a text replacement.
 
 ## Known limitations
 
-- **Google Docs API cannot create suggestions.** This is a [known limitation since 2016](https://issuetracker.google.com/issues/36763384). Sava works around this with Playwright browser automation.
-- **Google Docs API cannot anchor comments on Google Docs.** The internal `kix.*` paragraph IDs [aren't exposed](https://issuetracker.google.com/issues/36763384) by any public API. Sava uses Playwright to create anchored comments through the UI.
-- **Drive API comments are invisible on `.docx` files.** The API accepts them and returns success, but they don't render in Google Docs compatibility mode. Sava detects this and uses Playwright instead.
-- **Google's tutorial popups** ("Welcome to Office editing", "Editors can see your view history", etc.) can block Playwright actions. Sava aggressively dismisses these on page load, but new popup types may require updates.
-- **Playwright-based tools are slower** (~15-30 seconds) than API-based tools since they launch a headless browser.
+- **Google Docs API cannot create suggestions** — [known since 2016](https://issuetracker.google.com/issues/36763384). Sava works around this with Playwright.
+- **Google Docs API cannot anchor comments** — internal `kix.*` paragraph IDs [aren't exposed](https://issuetracker.google.com/issues/36763384). Sava uses Playwright.
+- **Drive API comments are invisible on `.docx` files** — the API accepts them silently but they don't render in Google Docs compatibility mode. Sava uses Playwright for all comment/suggestion interactions.
+- **Google's tutorial popups** ("Welcome to Office editing", "Editors can see your view history", etc.) can block Playwright. Sava dismisses these on page load, but new popup types may need updates.
+- **Playwright tools are slower** (~15-30 seconds) than API tools since they launch a headless browser.
 
 ## Where it's going
 
@@ -143,11 +136,9 @@ When making changes to documents, always use `suggest_edit` to create inline dif
 
 Only use `anchor_comment` when you need to leave a note, ask a question, or explain something that cannot be expressed as a text replacement.
 
-Never use `add_comment` — it creates unanchored comments that are invisible on .docx files.
-
 Never make direct edits to documents (Editing mode). All changes must go through `suggest_edit` (Suggesting mode) so that AI modifications are tracked and reviewable by humans.
 
-Available tools: read_doc, list_files, list_comments, suggest_edit, anchor_comment, reply_to_comment, resolve_comment, write_sheet.
+Available tools: read_doc, list_files, list_comments, suggest_edit, anchor_comment, delete_all_comments, write_sheet.
 
 $ARGUMENTS
 ```
