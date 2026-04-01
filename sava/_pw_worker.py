@@ -143,6 +143,56 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     return f'Suggested edit: "{quote}" -> "{replacement}"'
 
 
+def do_list_comments(pw, cookies_file, doc_id):
+    """List all comments and suggestions visible in the Google Docs UI."""
+    browser, context, page = open_doc(pw, cookies_file, doc_id)
+    page.locator(".kix-appview-editor").click()
+    page.wait_for_timeout(1000)
+
+    # Open the comments panel
+    btn = page.locator("#docs-docos-commentsbutton")
+    if btn.is_visible(timeout=3000):
+        btn.click()
+        page.wait_for_timeout(2000)
+
+    # Read from the stream view only (not anchored view) to avoid duplicates
+    comments = page.evaluate("""() => {
+        const results = [];
+        const seen = new Set();
+        for (const el of document.querySelectorAll('.docos-streamrootreplyview')) {
+            const author = el.querySelector('.docos-author');
+            const body = el.querySelector('.docos-replyview-body');
+            const timestamp = el.querySelector('.docos-replyview-timestamp');
+            const isSuggestion = el.querySelector('.docos-replyview-suggest') !== null;
+            const text = body ? body.textContent.trim() : '';
+            const key = (author ? author.textContent.trim() : '') + text;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            results.push({
+                author: author ? author.textContent.trim() : '?',
+                body: text,
+                time: timestamp ? timestamp.textContent.trim() : '',
+                type: isSuggestion ? 'suggestion' : 'comment',
+            });
+        }
+        return results;
+    }""")
+
+    save_and_close(browser, context, cookies_file)
+
+    if not comments:
+        return "No comments or suggestions found."
+
+    lines = []
+    for c in comments:
+        tag = "[SUGGESTION]" if c["type"] == "suggestion" else "[COMMENT]"
+        lines.append(f'{tag}  {c["author"]}  {c["time"]}')
+        lines.append(f'  {c["body"]}')
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def do_delete_all_comments(pw, cookies_file, doc_id):
     """Delete all comment threads authored by Sava the Owl."""
     browser, context, page = open_doc(pw, cookies_file, doc_id)
@@ -210,6 +260,8 @@ def main():
             result = do_anchor_comment(pw, cookies_file, payload["doc_id"], payload["quote"], payload["message"])
         elif action == "suggest_edit":
             result = do_suggest_edit(pw, cookies_file, payload["doc_id"], payload["quote"], payload["replacement"])
+        elif action == "list_comments":
+            result = do_list_comments(pw, cookies_file, payload["doc_id"])
         elif action == "delete_all_comments":
             result = do_delete_all_comments(pw, cookies_file, payload["doc_id"])
         else:

@@ -166,40 +166,8 @@ def _format_workbook(wb, name: str) -> str:
 
 
 def list_comments(doc_id: str) -> str:
-    """List all comments and replies on a Google Doc."""
-    drive = _drive_service()
-    lines = []
-    page_token = None
-
-    while True:
-        resp = drive.comments().list(
-            fileId=doc_id,
-            fields="comments(id,content,quotedFileContent,resolved,author,createdTime,"
-                   "replies(id,content,author,createdTime,action)),nextPageToken",
-            includeDeleted=False,
-            pageSize=100,
-            pageToken=page_token,
-        ).execute()
-
-        for c in resp.get("comments", []):
-            status = "[RESOLVED]" if c.get("resolved") else "[OPEN]"
-            author = c.get("author", {}).get("displayName", "?")
-            quoted = c.get("quotedFileContent", {}).get("value", "")
-            lines.append(f"\nComment {c['id']}  {status}  by {author}  {c.get('createdTime', '')}")
-            if quoted:
-                lines.append(f'  Quoted: "{quoted}"')
-            lines.append(f"  {c['content']}")
-
-            for r in c.get("replies", []):
-                r_author = r.get("author", {}).get("displayName", "?")
-                action = f" [{r['action']}]" if r.get("action") else ""
-                lines.append(f"    -> {r_author}{action}: {r['content']}")
-
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-
-    return "\n".join(lines) if lines else "No comments found."
+    """List all comments and suggestions visible in the Google Docs UI."""
+    return run_playwright_action("list_comments", doc_id=doc_id)
 
 
 def add_comment(doc_id: str, message: str, quote: str = "") -> str:
