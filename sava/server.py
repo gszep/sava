@@ -8,15 +8,8 @@ mcp = FastMCP("sava")
 
 
 # ---------------------------------------------------------------------------
-# Google Docs tools
+# Google Drive
 # ---------------------------------------------------------------------------
-
-@mcp.tool()
-def read_doc(doc_id: str) -> str:
-    """Read the full text content of a Google Doc. The doc_id is the long string
-    in the URL: docs.google.com/document/d/<doc_id>/edit"""
-    return gdocs.read_doc(doc_id)
-
 
 @mcp.tool()
 def list_files() -> str:
@@ -25,43 +18,69 @@ def list_files() -> str:
 
 
 @mcp.tool()
+def read_doc(doc_id: str) -> str:
+    """Read any file on Google Drive. Supports Google Docs, Google Sheets,
+    Word (.docx), Excel (.xlsx), and PDF. The doc_id is the long string
+    in the URL: docs.google.com/document/d/<doc_id>/edit"""
+    return gdocs.read_doc(doc_id)
+
+
+# ---------------------------------------------------------------------------
+# Google Sheets
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def write_sheet(spreadsheet_id: str, range: str, values: list[list[str]]) -> str:
+    """Write values to a Google Sheet. The range uses A1 notation
+    e.g. 'Sheet1!A1:C3'. Values is a 2D array of strings."""
+    return gdocs.write_sheet(spreadsheet_id, range, values)
+
+
+# ---------------------------------------------------------------------------
+# Comments (works on any Google Drive file)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
 def list_comments(doc_id: str) -> str:
-    """List all comments and replies on a Google Doc."""
+    """List all comments and replies on a file."""
     return gdocs.list_comments(doc_id)
 
 
 @mcp.tool()
 def add_comment(doc_id: str, message: str, quote: str = "") -> str:
-    """Post a comment on a Google Doc. If quote is provided, the comment
+    """Post a comment on a file. If quote is provided, the comment
     will reference that text passage."""
     return gdocs.add_comment(doc_id, message, quote)
 
 
 @mcp.tool()
 def reply_to_comment(doc_id: str, comment_id: str, message: str) -> str:
-    """Reply to an existing comment on a Google Doc."""
+    """Reply to an existing comment."""
     return gdocs.reply_to_comment(doc_id, comment_id, message)
 
 
 @mcp.tool()
 def resolve_comment(doc_id: str, comment_id: str, message: str = "Resolved.") -> str:
-    """Resolve a comment thread on a Google Doc."""
+    """Resolve a comment thread."""
     return gdocs.resolve_comment(doc_id, comment_id, message)
 
 
+# ---------------------------------------------------------------------------
+# Browser-based (Playwright) — anchored comments + suggesting mode
+# ---------------------------------------------------------------------------
+
 @mcp.tool()
 def anchor_comment(doc_id: str, quote: str, message: str) -> str:
-    """Post a comment anchored/highlighted to specific text in a Google Doc.
-    Uses browser automation to create a properly anchored comment.
-    Requires a saved browser session (run sava-login first)."""
+    """Post a comment anchored/highlighted to specific text.
+    Uses browser automation. Requires a saved browser session."""
     return gdocs.anchor_comment(doc_id, quote, message)
 
 
 @mcp.tool()
 def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
-    """Create a tracked suggestion (suggesting mode) in a Google Doc.
+    """Create a tracked suggestion (suggesting mode).
     Finds the quoted text and suggests replacing it with the replacement.
-    Uses browser automation. Requires a saved browser session (run sava-login first)."""
+    Uses browser automation. Requires a saved browser session."""
     return gdocs.suggest_edit(doc_id, quote, replacement)
 
 

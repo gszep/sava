@@ -1,4 +1,4 @@
-"""Google Docs capability — read documents, manage comments, suggest edits."""
+"""Google Workspace capability — read/write docs, sheets, PDFs; manage comments; suggest edits."""
 
 from googleapiclient.discovery import build
 
@@ -14,19 +14,38 @@ def _drive_service():
     return build("drive", "v3", credentials=get_credentials())
 
 
+def _sheets_service():
+    return build("sheets", "v4", credentials=get_credentials())
+
+
+def _download_file(drive, file_id):
+    """Download a file from Drive into an in-memory BytesIO."""
+    import io
+    from googleapiclient.http import MediaIoBaseDownload
+
+    fh = io.BytesIO()
+    request = drive.files().get_media(fileId=file_id)
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    fh.seek(0)
+    return fh
+
+
 def read_doc(doc_id: str) -> str:
-    """Read the full text content of a Google Doc or Word file on Drive."""
+    """Read the full text content of a file on Google Drive.
+    Supports: Google Docs, Google Sheets, Word (.docx), Excel (.xlsx), and PDF."""
     drive = _drive_service()
 
-    # Check the file's mimeType to decide how to read it
     meta = drive.files().get(
         fileId=doc_id, fields="name,mimeType", supportsAllDrives=True
     ).execute()
     mime = meta.get("mimeType", "")
     name = meta.get("name", "(untitled)")
 
+    # --- Native Google Doc ---
     if "google-apps.document" in mime:
-        # Native Google Doc — use the Docs API for rich content
         docs = _docs_service()
         doc = docs.documents().get(
             documentId=doc_id,
@@ -44,37 +63,106 @@ def read_doc(doc_id: str) -> str:
                     parts.append(text_run["content"])
 
         return f"# {name}\n\n{''.join(parts)}"
-    else:
-        # Non-native file (.docx etc.) — download and extract text
-        import io
+
+    # --- Native Google Sheet ---
+    if "google-apps.spreadsheet" in mime:
+        return _read_google_sheet(doc_id, name)
+
+    # --- Word (.docx) ---
+    if "wordprocessingml" in mime:
         import zipfile
-        from googleapiclient.http import MediaIoBaseDownload
         from lxml import etree
 
-        fh = io.BytesIO()
-        request = drive.files().get_media(fileId=doc_id)
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
+        fh = _download_file(drive, doc_id)
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        with zipfile.ZipFile(fh) as z:
+            root = etree.fromstring(z.read("word/document.xml"))
 
-        if "wordprocessingml" in mime:
-            fh.seek(0)
-            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-            with zipfile.ZipFile(fh) as z:
-                root = etree.fromstring(z.read("word/document.xml"))
+        paragraphs = []
+        for p in root.findall(".//w:p", ns):
+            runs = p.findall(".//w:t", ns)
+            text = "".join(t.text or "" for t in runs)
+            if text:
+                paragraphs.append(text)
 
-            # Build text paragraph by paragraph from w:p elements
-            paragraphs = []
-            for p in root.findall(".//w:p", ns):
-                runs = p.findall(".//w:t", ns)
-                text = "".join(t.text or "" for t in runs)
-                if text:
-                    paragraphs.append(text)
+        return f"# {name}\n\n" + "\n".join(paragraphs)
 
-            return f"# {name}\n\n" + "\n".join(paragraphs)
+    # --- Excel (.xlsx) ---
+    if "spreadsheetml" in mime:
+        import openpyxl
 
-        return f"# {name}\n\n(Unsupported format: {mime})"
+        fh = _download_file(drive, doc_id)
+        wb = openpyxl.load_workbook(fh, read_only=True, data_only=True)
+        return _format_workbook(wb, name)
+
+    # --- PDF ---
+    if "pdf" in mime:
+        import pymupdf
+
+        fh = _download_file(drive, doc_id)
+        doc = pymupdf.open(stream=fh.read(), filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            if text.strip():
+                pages.append(f"--- Page {i + 1} ---\n{text}")
+        doc.close()
+
+        return f"# {name}\n\n" + "\n".join(pages) if pages else f"# {name}\n\n(No text found in PDF)"
+
+    return f"# {name}\n\n(Unsupported format: {mime})"
+
+
+def _read_google_sheet(spreadsheet_id: str, name: str) -> str:
+    """Read all sheets from a Google Sheet via the Sheets API."""
+    sheets = _sheets_service()
+    meta = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheet_names = [s["properties"]["title"] for s in meta.get("sheets", [])]
+
+    parts = [f"# {name}\n"]
+    for sheet_name in sheet_names:
+        result = sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=sheet_name,
+        ).execute()
+        rows = result.get("values", [])
+        if not rows:
+            parts.append(f"\n## {sheet_name}\n(empty)")
+            continue
+
+        parts.append(f"\n## {sheet_name}\n")
+        # Format as a markdown table
+        header = rows[0]
+        parts.append("| " + " | ".join(str(c) for c in header) + " |")
+        parts.append("| " + " | ".join("---" for _ in header) + " |")
+        for row in rows[1:]:
+            # Pad row to match header length
+            padded = row + [""] * (len(header) - len(row))
+            parts.append("| " + " | ".join(str(c) for c in padded) + " |")
+
+    return "\n".join(parts)
+
+
+def _format_workbook(wb, name: str) -> str:
+    """Format an openpyxl workbook as readable text."""
+    parts = [f"# {name}\n"]
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            parts.append(f"\n## {sheet_name}\n(empty)")
+            continue
+
+        parts.append(f"\n## {sheet_name}\n")
+        header = [str(c) if c is not None else "" for c in rows[0]]
+        parts.append("| " + " | ".join(header) + " |")
+        parts.append("| " + " | ".join("---" for _ in header) + " |")
+        for row in rows[1:]:
+            cells = [str(c) if c is not None else "" for c in row]
+            cells += [""] * (len(header) - len(cells))
+            parts.append("| " + " | ".join(cells) + " |")
+
+    return "\n".join(parts)
 
 
 def list_comments(doc_id: str) -> str:
@@ -152,6 +240,19 @@ def resolve_comment(doc_id: str, comment_id: str, message: str = "Resolved.") ->
     ).execute()
 
     return f"Resolved comment {comment_id}"
+
+
+def write_sheet(spreadsheet_id: str, range: str, values: list[list[str]]) -> str:
+    """Write values to a Google Sheet. Range is in A1 notation e.g. 'Sheet1!A1:C3'."""
+    sheets = _sheets_service()
+    result = sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=range,
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+    updated = result.get("updatedCells", 0)
+    return f"Updated {updated} cells in {range}"
 
 
 def anchor_comment(doc_id: str, quote: str, message: str) -> str:
