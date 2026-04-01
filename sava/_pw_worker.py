@@ -10,12 +10,46 @@ from playwright.sync_api import sync_playwright
 
 
 def dismiss_popups(page):
+    """Aggressively dismiss any modal/dialog/toast that blocks the editor.
+    Rather than matching specific text, click any small button inside a
+    dialog-like container — these are almost always dismissal buttons."""
     page.evaluate("""() => {
-        const labels = ['I understand', 'Got it', 'OK', 'Dismiss', 'No thanks'];
-        const all = document.querySelectorAll('button, [role="button"], [jsname]');
-        for (const el of all) {
-            const text = el.textContent.trim();
-            if (labels.some(l => text === l)) { el.click(); return; }
+        // Strategy 1: Click buttons inside dialogs/overlays
+        const dialogs = document.querySelectorAll(
+            '[role="dialog"], [role="alertdialog"], .modal, [class*="Dialog"], [class*="dialog"]'
+        );
+        for (const dialog of dialogs) {
+            const buttons = dialog.querySelectorAll('button, [role="button"]');
+            for (const btn of buttons) {
+                const text = btn.textContent.trim().toLowerCase();
+                // Click anything that looks like an acknowledgement
+                if (['got it', 'ok', 'okay', 'dismiss', 'close', 'no thanks',
+                     'i understand', 'not now', 'skip', 'next time', 'maybe later',
+                     'continue'].includes(text)) {
+                    btn.click();
+                    return;
+                }
+            }
+            // If there's only one button in the dialog, just click it
+            if (buttons.length === 1) {
+                buttons[0].click();
+                return;
+            }
+        }
+
+        // Strategy 2: Catch Google's custom Material Design dialogs
+        const gmDialogs = document.querySelectorAll(
+            '[class*="WizDialog"], [class*="material"], [data-disable-esc-to-close]'
+        );
+        for (const dialog of gmDialogs) {
+            const buttons = dialog.querySelectorAll('button, [role="button"], [jsname]');
+            for (const btn of buttons) {
+                const text = btn.textContent.trim().toLowerCase();
+                if (text.length > 0 && text.length < 30) {
+                    btn.click();
+                    return;
+                }
+            }
         }
     }""")
 
@@ -29,9 +63,12 @@ def open_doc(pw, cookies_file, doc_id):
         wait_until="domcontentloaded",
     )
     page.wait_for_selector(".kix-appview-editor", timeout=30000)
-    page.wait_for_timeout(3000)
-    dismiss_popups(page)
-    page.wait_for_timeout(1000)
+
+    # Dismiss popups repeatedly — some appear with a delay
+    for _ in range(3):
+        page.wait_for_timeout(2000)
+        dismiss_popups(page)
+
     return browser, context, page
 
 
