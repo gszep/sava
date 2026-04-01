@@ -1,10 +1,9 @@
 """Google Docs capability — read documents, manage comments, suggest edits."""
 
 from googleapiclient.discovery import build
-from playwright.sync_api import sync_playwright
 
 from ..auth import get_credentials
-from ..browser import open_doc_page, switch_to_suggesting, save_and_close
+from ..browser import run_playwright_action
 
 
 def _docs_service():
@@ -116,121 +115,12 @@ def resolve_comment(doc_id: str, comment_id: str, message: str = "Resolved.") ->
 
 def anchor_comment(doc_id: str, quote: str, message: str) -> str:
     """Post a comment anchored to specific text using browser automation."""
-    with sync_playwright() as pw:
-        browser, context, page = open_doc_page(pw, doc_id)
-
-        page.locator(".kix-appview-editor").click()
-        page.wait_for_timeout(1000)
-
-        # Find the text via Ctrl+F
-        page.keyboard.press("Control+f")
-        page.wait_for_timeout(1500)
-
-        find_input = None
-        for selector in [
-            "input[aria-label='Find in document']",
-            "input[name='findInput']",
-            "input[type='text']",
-        ]:
-            loc = page.locator(selector).first
-            if loc.is_visible(timeout=1000):
-                find_input = loc
-                break
-
-        if not find_input:
-            save_and_close(browser, context)
-            return "Error: could not find the search input."
-
-        find_input.click()
-        page.keyboard.type(quote, delay=20)
-        page.wait_for_timeout(500)
-        page.keyboard.press("Enter")
-        page.wait_for_timeout(1000)
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
-
-        # Open comment dialog on selected text
-        page.keyboard.press("Control+Alt+m")
-        page.wait_for_timeout(1500)
-
-        comment_box = None
-        for selector in [
-            "[aria-label='Add a comment']",
-            "[aria-label='Enter new comment']",
-            "textarea",
-            "[contenteditable='true'][role='textbox']",
-        ]:
-            loc = page.locator(selector).first
-            if loc.is_visible(timeout=1000):
-                comment_box = loc
-                break
-
-        if not comment_box:
-            save_and_close(browser, context)
-            return "Error: could not find the comment box."
-
-        comment_box.click()
-        page.keyboard.type(message, delay=10)
-        page.wait_for_timeout(300)
-        page.keyboard.press("Control+Enter")
-        page.wait_for_timeout(2000)
-
-        save_and_close(browser, context)
-        return f'Anchored comment posted on: "{quote}"'
+    return run_playwright_action("anchor_comment", doc_id=doc_id, quote=quote, message=message)
 
 
 def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
     """Create a tracked suggestion using Find & Replace in Suggesting mode."""
-    with sync_playwright() as pw:
-        browser, context, page = open_doc_page(pw, doc_id)
-
-        page.locator(".kix-appview-editor").click()
-        page.wait_for_timeout(500)
-
-        switch_to_suggesting(page)
-
-        # Open Find & Replace
-        page.keyboard.press("Control+h")
-        page.wait_for_timeout(2000)
-
-        # Focus the find input and type
-        page.evaluate("""() => {
-            const inputs = document.querySelectorAll('[role="dialog"] input');
-            if (inputs[0]) inputs[0].focus();
-        }""")
-        page.wait_for_timeout(300)
-        page.keyboard.type(quote, delay=10)
-        page.wait_for_timeout(500)
-
-        # Tab to replace field and type
-        page.keyboard.press("Tab")
-        page.wait_for_timeout(300)
-        page.keyboard.type(replacement, delay=10)
-        page.wait_for_timeout(500)
-
-        # Click Next to find the match
-        page.evaluate("""() => {
-            const els = document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button');
-            for (const el of els) {
-                if (el.textContent.trim() === 'Next') { el.click(); return; }
-            }
-        }""")
-        page.wait_for_timeout(1000)
-
-        # Click Replace to apply as suggestion
-        page.evaluate("""() => {
-            const els = document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button');
-            for (const el of els) {
-                if (el.textContent.trim() === 'Replace') { el.click(); return; }
-            }
-        }""")
-        page.wait_for_timeout(2000)
-
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
-
-        save_and_close(browser, context)
-        return f'Suggested edit: "{quote}" -> "{replacement}"'
+    return run_playwright_action("suggest_edit", doc_id=doc_id, quote=quote, replacement=replacement)
 
 
 def list_docs() -> str:
