@@ -63,12 +63,6 @@ def resolve_all_comments(doc_id: str) -> str:
     return gdocs.resolve_all_comments(doc_id)
 
 
-@mcp.tool()
-def reply_to_comment(doc_id: str, comment_id: str, message: str) -> str:
-    """Reply to an existing comment."""
-    return gdocs.reply_to_comment(doc_id, comment_id, message)
-
-
 def main():
     mcp.run()
 
