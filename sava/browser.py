@@ -29,7 +29,7 @@ def run_playwright_action(action: str, **kwargs) -> str:
         input=payload,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=300,
     )
 
     if result.returncode != 0:

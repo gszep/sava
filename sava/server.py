@@ -58,9 +58,10 @@ def anchor_comment(doc_id: str, quote: str, message: str) -> str:
 
 
 @mcp.tool()
-def resolve_all_comments(doc_id: str) -> str:
-    """Resolve all open comments in a document."""
-    return gdocs.resolve_all_comments(doc_id)
+def delete_all_comments(doc_id: str) -> str:
+    """Delete all comment threads in a document. This permanently removes
+    them — use with care."""
+    return gdocs.delete_all_comments(doc_id)
 
 
 def main():

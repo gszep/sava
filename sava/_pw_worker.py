@@ -1,4 +1,4 @@
-"""Playwright worker — runs in its own process to avoid asyncio conflicts.
+"""Playwright worker — runs in a subprocess to avoid asyncio conflicts with the MCP server.
 
 Reads a JSON payload from stdin, performs the requested action, prints the result to stdout.
 """
@@ -8,67 +8,35 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+DISMISS_LABELS = [
+    "got it", "ok", "okay", "dismiss", "close", "no thanks",
+    "i understand", "not now", "skip", "next time", "maybe later", "continue",
+]
+
 
 def dismiss_popups(page):
-    """Aggressively dismiss any modal/dialog/toast that blocks the editor.
-    Rather than matching specific text, click any small button inside a
-    dialog-like container — these are almost always dismissal buttons."""
-    page.evaluate("""() => {
-        // Strategy 1: Click buttons inside dialogs/overlays
-        const dialogs = document.querySelectorAll(
-            '[role="dialog"], [role="alertdialog"], .modal, [class*="Dialog"], [class*="dialog"]'
-        );
-        for (const dialog of dialogs) {
-            const buttons = dialog.querySelectorAll('button, [role="button"]');
-            for (const btn of buttons) {
-                const text = btn.textContent.trim().toLowerCase();
-                // Click anything that looks like an acknowledgement
-                if (['got it', 'ok', 'okay', 'dismiss', 'close', 'no thanks',
-                     'i understand', 'not now', 'skip', 'next time', 'maybe later',
-                     'continue'].includes(text)) {
-                    btn.click();
-                    return;
+    page.evaluate("""(labels) => {
+        for (const sel of ['[role="dialog"]', '[role="alertdialog"]', '[class*="Dialog"]', '[class*="WizDialog"]', '[data-disable-esc-to-close]']) {
+            for (const dialog of document.querySelectorAll(sel)) {
+                const buttons = dialog.querySelectorAll('button, [role="button"], [jsname]');
+                for (const btn of buttons) {
+                    if (labels.includes(btn.textContent.trim().toLowerCase())) { btn.click(); return; }
                 }
-            }
-            // If there's only one button in the dialog, just click it
-            if (buttons.length === 1) {
-                buttons[0].click();
-                return;
+                if (buttons.length === 1) { buttons[0].click(); return; }
             }
         }
-
-        // Strategy 2: Catch Google's custom Material Design dialogs
-        const gmDialogs = document.querySelectorAll(
-            '[class*="WizDialog"], [class*="material"], [data-disable-esc-to-close]'
-        );
-        for (const dialog of gmDialogs) {
-            const buttons = dialog.querySelectorAll('button, [role="button"], [jsname]');
-            for (const btn of buttons) {
-                const text = btn.textContent.trim().toLowerCase();
-                if (text.length > 0 && text.length < 30) {
-                    btn.click();
-                    return;
-                }
-            }
-        }
-    }""")
+    }""", DISMISS_LABELS)
 
 
 def open_doc(pw, cookies_file, doc_id):
     browser = pw.chromium.launch(headless=True)
     context = browser.new_context(storage_state=cookies_file)
     page = context.new_page()
-    page.goto(
-        f"https://docs.google.com/document/d/{doc_id}/edit",
-        wait_until="domcontentloaded",
-    )
+    page.goto(f"https://docs.google.com/document/d/{doc_id}/edit", wait_until="domcontentloaded")
     page.wait_for_selector(".kix-appview-editor", timeout=30000)
-
-    # Dismiss popups repeatedly — some appear with a delay
     for _ in range(3):
         page.wait_for_timeout(2000)
         dismiss_popups(page)
-
     return browser, context, page
 
 
@@ -77,70 +45,64 @@ def save_and_close(browser, context, cookies_file):
     browser.close()
 
 
+def find_text(page, quote):
+    page.keyboard.press("Control+f")
+    page.wait_for_timeout(1500)
+    for selector in ["input[aria-label='Find in document']", "input[name='findInput']", "input[type='text']"]:
+        loc = page.locator(selector).first
+        if loc.is_visible(timeout=1000):
+            loc.click()
+            page.keyboard.type(quote, delay=20)
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(1000)
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+            return True
+    return False
+
+
+def click_dialog_button(page, text):
+    page.evaluate("""(text) => {
+        for (const sel of ['[role="dialog"]', '[role="alertdialog"]', '[class*="Dialog"]']) {
+            for (const dialog of document.querySelectorAll(sel)) {
+                for (const btn of dialog.querySelectorAll('button, [role="button"]')) {
+                    if (btn.textContent.trim() === text) { btn.click(); return; }
+                }
+            }
+        }
+    }""", text)
+
+
 def do_anchor_comment(pw, cookies_file, doc_id, quote, message):
     browser, context, page = open_doc(pw, cookies_file, doc_id)
-
     page.locator(".kix-appview-editor").click()
     page.wait_for_timeout(1000)
 
-    page.keyboard.press("Control+f")
-    page.wait_for_timeout(1500)
-
-    find_input = None
-    for selector in [
-        "input[aria-label='Find in document']",
-        "input[name='findInput']",
-        "input[type='text']",
-    ]:
-        loc = page.locator(selector).first
-        if loc.is_visible(timeout=1000):
-            find_input = loc
-            break
-
-    if not find_input:
+    if not find_text(page, quote):
         save_and_close(browser, context, cookies_file)
         return "Error: could not find the search input."
-
-    find_input.click()
-    page.keyboard.type(quote, delay=20)
-    page.wait_for_timeout(500)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(1000)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(500)
 
     page.keyboard.press("Control+Alt+m")
     page.wait_for_timeout(1500)
 
-    comment_box = None
-    for selector in [
-        "[aria-label='Add a comment']",
-        "[aria-label='Enter new comment']",
-        "textarea",
-        "[contenteditable='true'][role='textbox']",
-    ]:
+    for selector in ["[aria-label='Add a comment']", "textarea", "[contenteditable='true'][role='textbox']"]:
         loc = page.locator(selector).first
         if loc.is_visible(timeout=1000):
-            comment_box = loc
-            break
-
-    if not comment_box:
-        save_and_close(browser, context, cookies_file)
-        return "Error: could not find the comment box."
-
-    comment_box.click()
-    page.keyboard.type(message, delay=10)
-    page.wait_for_timeout(300)
-    page.keyboard.press("Control+Enter")
-    page.wait_for_timeout(2000)
+            loc.click()
+            page.keyboard.type(message, delay=10)
+            page.wait_for_timeout(300)
+            page.keyboard.press("Control+Enter")
+            page.wait_for_timeout(2000)
+            save_and_close(browser, context, cookies_file)
+            return f'Anchored comment posted on: "{quote}"'
 
     save_and_close(browser, context, cookies_file)
-    return f'Anchored comment posted on: "{quote}"'
+    return "Error: could not find the comment box."
 
 
 def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     browser, context, page = open_doc(pw, cookies_file, doc_id)
-
     page.locator(".kix-appview-editor").click()
     page.wait_for_timeout(500)
 
@@ -153,7 +115,7 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     page.get_by_text("Suggesting", exact=True).click()
     page.wait_for_timeout(500)
 
-    # Open Find & Replace
+    # Find & Replace
     page.keyboard.press("Control+h")
     page.wait_for_timeout(2000)
 
@@ -164,27 +126,14 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     page.wait_for_timeout(300)
     page.keyboard.type(quote, delay=10)
     page.wait_for_timeout(500)
-
     page.keyboard.press("Tab")
     page.wait_for_timeout(300)
     page.keyboard.type(replacement, delay=10)
     page.wait_for_timeout(500)
 
-    # Click Next then Replace
-    page.evaluate("""() => {
-        const els = document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button');
-        for (const el of els) {
-            if (el.textContent.trim() === 'Next') { el.click(); return; }
-        }
-    }""")
+    click_dialog_button(page, "Next")
     page.wait_for_timeout(1000)
-
-    page.evaluate("""() => {
-        const els = document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button');
-        for (const el of els) {
-            if (el.textContent.trim() === 'Replace') { el.click(); return; }
-        }
-    }""")
+    click_dialog_button(page, "Replace")
     page.wait_for_timeout(2000)
 
     page.keyboard.press("Escape")
@@ -194,64 +143,61 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     return f'Suggested edit: "{quote}" -> "{replacement}"'
 
 
-def do_resolve_all_comments(pw, cookies_file, doc_id):
-    """Resolve all open comments in the document via the UI.
-
-    Strategy: click each comment thread to open it, then click the
-    resolve (checkmark) button. Track which comments we've resolved
-    to avoid infinite loops.
-    """
+def do_delete_all_comments(pw, cookies_file, doc_id):
+    """Delete all comment threads authored by Sava the Owl."""
     browser, context, page = open_doc(pw, cookies_file, doc_id)
-
     page.locator(".kix-appview-editor").click()
     page.wait_for_timeout(1000)
 
-    # First, click on a comment highlight in the doc to open the comment pane
-    # Then look for resolve buttons
-    resolved = 0
-    last_count = -1
-
-    for attempt in range(20):  # safety limit
-        # Count currently visible resolve buttons to detect progress
-        count = page.evaluate("""() => {
-            return document.querySelectorAll(
-                '[aria-label*="esolve"], [data-tooltip*="esolve"]'
-            ).length;
-        }""")
-
-        if count == 0 or count == last_count:
-            # No resolve buttons, or we're stuck — try clicking a comment highlight
-            clicked = page.evaluate("""() => {
-                // Click any comment highlight/annotation in the doc body
-                const highlights = document.querySelectorAll(
-                    '.docos-anchoredreplyview, [class*="docos-anchor"], .kix-commenthighlight'
-                );
-                if (highlights.length > 0) {
-                    highlights[0].click();
-                    return true;
-                }
-                return false;
-            }""")
-            if not clicked:
-                break
-            page.wait_for_timeout(1500)
-            last_count = -1
-            continue
-
-        last_count = count
-
-        # Click the first resolve button
-        page.evaluate("""() => {
-            const btn = document.querySelector(
-                '[aria-label*="esolve"], [data-tooltip*="esolve"]'
-            );
-            if (btn) btn.click();
-        }""")
+    # Open the comments panel
+    btn = page.locator("#docs-docos-commentsbutton")
+    if btn.is_visible(timeout=3000):
+        btn.click()
         page.wait_for_timeout(2000)
-        resolved += 1
+
+    deleted = 0
+    for _ in range(50):
+        # Find Sava's comment, select it, get "..." button position
+        pos = page.evaluate("""() => {
+            for (const el of document.querySelectorAll('.docos-streamrootreplyview, .docos-docoview-rootreply')) {
+                if (!el.querySelector('[data-name="Sava the Owl"]')) continue;
+                el.scrollIntoView({block: 'center'});
+                el.click();
+                const menu = el.querySelector('.docos-docomenu-dropdown');
+                if (!menu) continue;
+                const r = menu.getBoundingClientRect();
+                if (r.width > 0) return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }
+            return null;
+        }""")
+        if not pos:
+            break
+
+        page.wait_for_timeout(1000)
+        page.mouse.click(pos["x"], pos["y"])
+        page.wait_for_timeout(800)
+
+        # Navigate dropdown with keyboard to avoid fragile hover
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(200)
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(200)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(1000)
+
+        # Confirm deletion dialog
+        try:
+            page.get_by_role("button", name="Delete").click(timeout=3000)
+        except Exception:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+            break
+
+        page.wait_for_timeout(2000)
+        deleted += 1
 
     save_and_close(browser, context, cookies_file)
-    return f"Resolved {resolved} comments"
+    return f"Deleted {deleted} Sava comment threads"
 
 
 def main():
@@ -261,17 +207,11 @@ def main():
 
     with sync_playwright() as pw:
         if action == "anchor_comment":
-            result = do_anchor_comment(
-                pw, cookies_file, payload["doc_id"], payload["quote"], payload["message"]
-            )
+            result = do_anchor_comment(pw, cookies_file, payload["doc_id"], payload["quote"], payload["message"])
         elif action == "suggest_edit":
-            result = do_suggest_edit(
-                pw, cookies_file, payload["doc_id"], payload["quote"], payload["replacement"]
-            )
-        elif action == "resolve_all_comments":
-            result = do_resolve_all_comments(
-                pw, cookies_file, payload["doc_id"]
-            )
+            result = do_suggest_edit(pw, cookies_file, payload["doc_id"], payload["quote"], payload["replacement"])
+        elif action == "delete_all_comments":
+            result = do_delete_all_comments(pw, cookies_file, payload["doc_id"])
         else:
             result = f"Unknown action: {action}"
 
