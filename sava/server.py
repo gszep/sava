@@ -19,8 +19,8 @@ def read_doc(doc_id: str) -> str:
 
 
 @mcp.tool()
-def list_docs() -> str:
-    """List all Google Docs accessible to Sava."""
+def list_files() -> str:
+    """List all files accessible to Sava on Google Drive (docs, spreadsheets, PDFs, etc.)."""
     return gdocs.list_docs()
 
 

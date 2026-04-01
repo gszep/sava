@@ -164,8 +164,18 @@ def suggest_edit(doc_id: str, quote: str, replacement: str) -> str:
     return run_playwright_action("suggest_edit", doc_id=doc_id, quote=quote, replacement=replacement)
 
 
+_MIME_LABELS = {
+    "application/vnd.google-apps.document": "Google Doc",
+    "application/vnd.google-apps.spreadsheet": "Google Sheet",
+    "application/vnd.google-apps.folder": "Folder",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word (.docx)",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel (.xlsx)",
+    "application/pdf": "PDF",
+}
+
+
 def list_docs() -> str:
-    """List all Google Docs accessible to Sava."""
+    """List all files accessible to Sava on Google Drive."""
     drive = _drive_service()
     lines = []
     page_token = None
@@ -174,7 +184,6 @@ def list_docs() -> str:
         results = drive.files().list(
             pageSize=100,
             fields="files(id,name,mimeType,owners,webViewLink),nextPageToken",
-            q="mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document'",
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
             pageToken=page_token,
@@ -182,10 +191,12 @@ def list_docs() -> str:
 
         for f in results.get("files", []):
             owners = ", ".join(o.get("emailAddress", "?") for o in f.get("owners", []))
-            native = "Google Doc" if "google-apps" in f.get("mimeType", "") else "Word (.docx)"
-            lines.append(f"{f['name']}  [{native}]")
+            mime = f.get("mimeType", "")
+            label = _MIME_LABELS.get(mime, mime)
+            lines.append(f"{f['name']}  [{label}]")
             lines.append(f"  ID: {f['id']}")
-            lines.append(f"  Owner: {owners}")
+            if owners:
+                lines.append(f"  Owner: {owners}")
             lines.append(f"  Link: {f.get('webViewLink', 'N/A')}")
             lines.append("")
 
@@ -193,4 +204,4 @@ def list_docs() -> str:
         if not page_token:
             break
 
-    return "\n".join(lines) if lines else "No documents found."
+    return "\n".join(lines) if lines else "No files found."
