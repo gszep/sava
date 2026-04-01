@@ -133,6 +133,33 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
 
     click_dialog_button(page, "Next")
     page.wait_for_timeout(1000)
+
+    # Check match status before replacing
+    match_info = page.evaluate("""() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        if (!dialog) return {status: 'unknown'};
+        const text = dialog.textContent || '';
+        if (text.includes('not found') || text.includes('No results'))
+            return {status: 'not_found'};
+        // Look for "X of Y" match count
+        const match = text.match(/(\\d+)\\s+of\\s+(\\d+)/);
+        if (match) return {status: 'found', current: parseInt(match[1]), total: parseInt(match[2])};
+        return {status: 'unknown'};
+    }""")
+
+    if match_info.get("status") == "not_found":
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        save_and_close(browser, context, cookies_file)
+        return f'Error: no match found for "{quote}". The text may be split by a pending suggestion — check list_comments for conflicting edits.'
+
+    if match_info.get("status") == "found" and match_info.get("total", 1) > 1:
+        total = match_info["total"]
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        save_and_close(browser, context, cookies_file)
+        return f'Error: {total} matches found for "{quote}". Use a longer quote that uniquely identifies the target text.'
+
     click_dialog_button(page, "Replace")
     page.wait_for_timeout(2000)
 
