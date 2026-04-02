@@ -4,6 +4,7 @@ Reads a JSON payload from stdin, performs the requested action, prints the resul
 """
 
 import json
+import platform
 import sys
 
 from playwright.sync_api import sync_playwright
@@ -63,14 +64,16 @@ def find_text(page, quote):
 
 
 def click_dialog_button(page, text):
-    page.evaluate("""(text) => {
+    """Click a button in a dialog by its text. Returns True if found and clicked."""
+    return page.evaluate("""(text) => {
         for (const sel of ['[role="dialog"]', '[role="alertdialog"]', '[class*="Dialog"]']) {
             for (const dialog of document.querySelectorAll(sel)) {
                 for (const btn of dialog.querySelectorAll('button, [role="button"]')) {
-                    if (btn.textContent.trim() === text) { btn.click(); return; }
+                    if (btn.textContent.trim() === text) { btn.click(); return true; }
                 }
             }
         }
+        return false;
     }""", text)
 
 
@@ -115,8 +118,11 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     page.get_by_text("Suggesting", exact=True).click()
     page.wait_for_timeout(500)
 
-    # Find & Replace
-    page.keyboard.press("Control+h")
+    # Find & Replace (platform-aware shortcut)
+    if platform.system() == "Darwin":
+        page.keyboard.press("Meta+Shift+h")
+    else:
+        page.keyboard.press("Control+h")
     page.wait_for_timeout(2000)
 
     page.evaluate("""() => {
@@ -131,7 +137,11 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
     page.keyboard.type(replacement, delay=10)
     page.wait_for_timeout(500)
 
-    click_dialog_button(page, "Next")
+    if not click_dialog_button(page, "Next"):
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        save_and_close(browser, context, cookies_file)
+        return 'Error: could not find "Next" button. The Google Docs UI may be in a non-English language.'
     page.wait_for_timeout(1000)
 
     # Check match status before replacing
@@ -147,20 +157,32 @@ def do_suggest_edit(pw, cookies_file, doc_id, quote, replacement):
         return {status: 'unknown'};
     }""")
 
-    if match_info.get("status") == "not_found":
+    status = match_info.get("status")
+
+    if status == "not_found":
         page.keyboard.press("Escape")
         page.wait_for_timeout(500)
         save_and_close(browser, context, cookies_file)
         return f'Error: no match found for "{quote}". The text may be split by a pending suggestion — check list_comments for conflicting edits.'
 
-    if match_info.get("status") == "found" and match_info.get("total", 1) > 1:
+    if status == "found" and match_info.get("total", 1) > 1:
         total = match_info["total"]
         page.keyboard.press("Escape")
         page.wait_for_timeout(500)
         save_and_close(browser, context, cookies_file)
         return f'Error: {total} matches found for "{quote}". Use a longer quote that uniquely identifies the target text.'
 
-    click_dialog_button(page, "Replace")
+    if status == "unknown":
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        save_and_close(browser, context, cookies_file)
+        return f'Error: could not verify match count for "{quote}". The Google Docs UI may be in a non-English language.'
+
+    if not click_dialog_button(page, "Replace"):
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        save_and_close(browser, context, cookies_file)
+        return 'Error: could not find "Replace" button. The Google Docs UI may be in a non-English language.'
     page.wait_for_timeout(2000)
 
     page.keyboard.press("Escape")
