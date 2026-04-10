@@ -1,6 +1,6 @@
 # Sava 🦉
 
-An [MCP server](https://modelcontextprotocol.io/) that gives agentic coding tools like [Claude Code](https://claude.ai/claude-code) hands-on access to your Google Workspace — and eventually, your calendar, email, GCP, GitHub, and whatever else you trust it with.
+An [MCP server](https://modelcontextprotocol.io/) that gives agentic coding tools like [Claude Code](https://claude.ai/claude-code) hands-on access to your Google Workspace — calendar, email, tasks, documents, and whatever else you trust it with.
 
 Named after a Eurasian eagle-owl. Quietly watches over your documents, drops suggestions where they matter, and even knows how to use Google Docs' "Suggesting" mode — something Google's own API [still can't do](https://issuetracker.google.com/issues/36763384) after a decade of polite requests.
 
@@ -35,13 +35,38 @@ All document interactions go through headless Playwright browser automation. Thi
 - **Google's tutorial popups** ("Welcome to Office editing", "Editors can see your view history", etc.) can block Playwright. Sava dismisses these on page load, but new popup types may need updates.
 - **Playwright tools are slower** (~15-30 seconds) than API tools since they launch a headless browser.
 
+### Calendar
+
+| Tool | Description |
+|---|---|
+| `list_calendars` | List all calendars visible to the primary user |
+| `list_events` | List upcoming events (defaults to next 7 days) |
+| `create_event` | Create timed or all-day events with location, description, timezone |
+| `update_event` | Patch specific fields on an existing event |
+| `delete_event` | Delete an event by ID |
+
+### Gmail (read-only)
+
+| Tool | Description |
+|---|---|
+| `list_emails` | Search emails with Gmail query syntax |
+| `read_email` | Read full email content by message ID |
+
+### Tasks (read-only)
+
+| Tool | Description |
+|---|---|
+| `list_task_lists` | List all task lists |
+| `list_tasks` | List tasks in a task list |
+
 ## Where it's going
 
 ```
 capabilities/
   gdocs.py       # ✅ docs, sheets, PDFs, comments, suggestions
-  calendar.py    # 🔜
-  gmail.py       # 🔜
+  calendar.py    # ✅ events CRUD
+  gmail.py       # ✅ read-only search and read
+  tasks.py       # ✅ read-only list
   gcp.py         # 🔜
   github.py      # 🔜
 ```
@@ -56,7 +81,7 @@ Create a GCP project and enable the required APIs:
 
 ```bash
 gcloud projects create sava-the-owl
-gcloud services enable docs.googleapis.com drive.googleapis.com sheets.googleapis.com --project=sava-the-owl
+gcloud services enable docs.googleapis.com drive.googleapis.com sheets.googleapis.com calendar-json.googleapis.com gmail.googleapis.com tasks.googleapis.com --project=sava-the-owl
 ```
 
 Create a service account:
@@ -83,9 +108,13 @@ Set up domain-wide delegation so the service account can act as this user:
 
 1. Go to [admin.google.com/ac/owl/domainwidedelegation](https://admin.google.com/ac/owl/domainwidedelegation)
 2. Add the service account's **Client ID** (find it with `gcloud iam service-accounts describe sava-agent@sava-the-owl.iam.gserviceaccount.com --format="value(uniqueId)"`)
-3. Set OAuth scopes:
+3. Set OAuth scopes for the **Sava user** (document editing):
    ```
    https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/spreadsheets
+   ```
+4. Set OAuth scopes for the **primary user** (calendar, email, tasks — delegated access to the human's account):
+   ```
+   https://www.googleapis.com/auth/calendar,https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/tasks.readonly
    ```
 
 Share any documents you want Sava to access with `sava@yourdomain.com` as Editor (not the service account email).
@@ -122,6 +151,7 @@ with sync_playwright() as pw:
 claude mcp add -s user \
   -e GOOGLE_SERVICE_ACCOUNT_FILE=$HOME/.config/gcloud/sava-agent.json \
   -e GOOGLE_IMPERSONATE_USER=sava@yourdomain.com \
+  -e GOOGLE_PRIMARY_USER=you@yourdomain.com \
   -- sava uv run --directory /path/to/sava sava
 ```
 
@@ -138,7 +168,7 @@ Only use `anchor_comment` when you need to leave a note, ask a question, or expl
 
 Never make direct edits to documents (Editing mode). All changes must go through `suggest_edit` (Suggesting mode) so that AI modifications are tracked and reviewable by humans.
 
-Available tools: read_doc, list_files, list_comments, suggest_edit, anchor_comment, delete_all_comments, write_sheet.
+Available tools: read_doc, list_files, list_comments, suggest_edit, anchor_comment, delete_all_comments, write_sheet, list_calendars, list_events, create_event, update_event, delete_event, list_emails, read_email, list_task_lists, list_tasks.
 
 $ARGUMENTS
 ```
@@ -160,5 +190,5 @@ The `/sava` prefix creates a clear boundary between normal Claude Code sessions 
 
 - **Service account key** (`~/.config/gcloud/sava-agent.json`) — the crown jewel. `chmod 600`, never commit it.
 - **Playwright session** (`~/.config/gcloud/sava-playwright-state.json`) — treat like a cookie jar. Contains the browser session for `sava@yourdomain.com`.
-- **Domain-wide delegation** — scoped to Docs, Drive, and Sheets only. The service account can only impersonate the Sava user, and Sava can only access files explicitly shared with it.
+- **Domain-wide delegation** — scoped to Docs, Drive, Sheets (as Sava user) and Calendar, Gmail, Tasks (as primary user). The service account can only impersonate delegated users, and Sava can only access files explicitly shared with it.
 - **No admin role** — the Sava Workspace user should have no admin privileges. Just a regular user.

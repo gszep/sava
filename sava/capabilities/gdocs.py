@@ -170,46 +170,6 @@ def list_comments(doc_id: str) -> str:
     return run_playwright_action("list_comments", doc_id=doc_id)
 
 
-def add_comment(doc_id: str, message: str, quote: str = "") -> str:
-    """Post a comment on a Google Doc. Optionally reference a text passage."""
-    drive = _drive_service()
-    content = f'Re: "{quote}"\n\n{message}' if quote else message
-
-    comment = drive.comments().create(
-        fileId=doc_id,
-        fields="id",
-        body={"content": content},
-    ).execute()
-
-    return f"Created comment {comment['id']}"
-
-
-def reply_to_comment(doc_id: str, comment_id: str, message: str) -> str:
-    """Reply to an existing comment."""
-    drive = _drive_service()
-    reply = drive.replies().create(
-        fileId=doc_id,
-        commentId=comment_id,
-        fields="id",
-        body={"content": message},
-    ).execute()
-
-    return f"Created reply {reply['id']} on comment {comment_id}"
-
-
-def resolve_comment(doc_id: str, comment_id: str, message: str = "Resolved.") -> str:
-    """Resolve a comment thread."""
-    drive = _drive_service()
-    drive.replies().create(
-        fileId=doc_id,
-        commentId=comment_id,
-        fields="id",
-        body={"content": message, "action": "resolve"},
-    ).execute()
-
-    return f"Resolved comment {comment_id}"
-
-
 def write_sheet(spreadsheet_id: str, range: str, values: list[list[str]]) -> str:
     """Write values to a Google Sheet. Range is in A1 notation e.g. 'Sheet1!A1:C3'."""
     sheets = _sheets_service()
